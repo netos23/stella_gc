@@ -2,7 +2,7 @@
 // Created by Nikita Morozov on 25.10.2025.
 //
 
-#include <string.h>
+
 #include "stella/gc.h"
 
 
@@ -143,10 +143,11 @@ void *scan_and_alloc(size_t size_in_bytes) {
             }
         }
         scanned += obj_size;
+        current_state.scan += obj_size;
     }
 
-    if (current_state.limit - size_in_bytes >= current_state.next) {
-        printf("Out of memory");
+    if (current_state.limit - size_in_bytes < current_state.next) {
+        fprintf(stderr, "Out of memory\n");
         print_gc_alloc_stats();
         print_gc_roots();
         print_gc_state();
@@ -266,11 +267,127 @@ void print_gc_state() {
 
 }
 
-void print_gc_roots() {
-    size_t i = 0;
 
-
-    for (gc_root *cur = current_state.roots_list; cur != NULL; cur = cur->next) {
-
+static size_t size_len(size_t v) {
+    size_t len = 1;
+    while (v >= 10) {
+        v /= 10;
+        ++len;
     }
+    return len;
+}
+
+static size_t ptr_to_str(char *buf, size_t cap, const void *p) {
+    if (p) return (size_t) snprintf(buf, cap, "%p", p);
+    return (size_t) snprintf(buf, cap, "(nil)");
+}
+
+static void print_border(FILE *out,
+                         size_t widx, size_t wnode, size_t wprev,
+                         size_t wnext, size_t wslot, size_t wval) {
+    fputc('+', out);
+    for (size_t i = 0; i < widx + 2; ++i) fputc('-', out);
+    fputc('+', out);
+    for (size_t i = 0; i < wnode + 2; ++i) fputc('-', out);
+    fputc('+', out);
+    for (size_t i = 0; i < wprev + 2; ++i) fputc('-', out);
+    fputc('+', out);
+    for (size_t i = 0; i < wnext + 2; ++i) fputc('-', out);
+    fputc('+', out);
+    for (size_t i = 0; i < wslot + 2; ++i) fputc('-', out);
+    fputc('+', out);
+    for (size_t i = 0; i < wval + 2; ++i) fputc('-', out);
+    fputc('+', out);
+    fputc('\n', out);
+}
+
+
+void print_gc_roots() {
+    FILE *out = stdout;
+
+    // Если список пуст — краткое сообщение и выход
+    if (!current_state.roots_list) {
+        fprintf(out, "GC roots: empty list (head=%p, tail=%p)\n",
+                (void *) current_state.roots_list, (void *) current_state.roots_last);
+        return;
+    }
+
+    // Заголовки таблицы
+    const char *H_IDX = "#";
+    const char *H_NODE = "node";
+    const char *H_PREV = "prev";
+    const char *H_NEXT = "next";
+    const char *H_SLOT = "slot";
+    const char *H_VAL = "*slot";
+
+
+    size_t widx = strlen(H_IDX);
+    size_t wnode = strlen(H_NODE);
+    size_t wprev = strlen(H_PREV);
+    size_t wnext = strlen(H_NEXT);
+    size_t wslot = strlen(H_SLOT);
+    size_t wval = strlen(H_VAL);
+
+    size_t nrows = 0;
+    for (gc_root *n = current_state.roots_list; n; n = n->next) {
+        char buf[32];
+        size_t len;
+
+        len = ptr_to_str(buf, sizeof(buf), (const void *) n);
+        if (len > wnode) wnode = len;
+
+        len = ptr_to_str(buf, sizeof(buf), (const void *) n->prev);
+        if (len > wprev) wprev = len;
+
+        len = ptr_to_str(buf, sizeof(buf), (const void *) n->next);
+        if (len > wnext) wnext = len;
+
+        len = ptr_to_str(buf, sizeof(buf), (const void *) n->content);
+        if (len > wslot) wslot = len;
+
+        void *val = n->content ? *n->content : NULL;
+        len = ptr_to_str(buf, sizeof(buf), (const void *) val);
+        if (len > wval) wval = len;
+
+        ++nrows;
+    }
+
+    size_t idxdigits = size_len(nrows ? (nrows - 1) : 0);
+    if (idxdigits > widx) widx = idxdigits;
+
+
+    print_border(out, widx, wnode, wprev, wnext, wslot, wval);
+    fprintf(out, "| %-*s | %-*s | %-*s | %-*s | %-*s | %-*s |\n",
+            (int) widx, H_IDX,
+            (int) wnode, H_NODE,
+            (int) wprev, H_PREV,
+            (int) wnext, H_NEXT,
+            (int) wslot, H_SLOT,
+            (int) wval, H_VAL);
+    print_border(out, widx, wnode, wprev, wnext, wslot, wval);
+
+    size_t i = 0;
+    for (gc_root *n = current_state.roots_list; n; n = n->next, ++i) {
+        char snode[32], sprev[32], snext[32], sslot[32], sval[32], sidx[32];
+
+        ptr_to_str(snode, sizeof(snode), (const void *) n);
+        ptr_to_str(sprev, sizeof(sprev), (const void *) n->prev);
+        ptr_to_str(snext, sizeof(snext), (const void *) n->next);
+        ptr_to_str(sslot, sizeof(sslot), (const void *) n->content);
+        void *val = n->content ? *n->content : NULL;
+        ptr_to_str(sval, sizeof(sval), (const void *) val);
+        snprintf(sidx, sizeof(sidx), "%zu", i);
+
+        fprintf(out, "| %-*s | %-*s | %-*s | %-*s | %-*s | %-*s |\n",
+                (int) widx, sidx,
+                (int) wnode, snode,
+                (int) wprev, sprev,
+                (int) wnext, snext,
+                (int) wslot, sslot,
+                (int) wval, sval);
+    }
+
+    print_border(out, widx, wnode, wprev, wnext, wslot, wval);
+    fprintf(out, "All roots: %zu (head=%p, tail=%p)\n",
+            nrows, (void *) current_state.roots_list, (void *) current_state.roots_last);
 }
