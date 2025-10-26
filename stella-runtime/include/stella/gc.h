@@ -3,6 +3,7 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <stddef.h>
 
 /** This macro is used whenever the runtime wants to READ a heap object's field.
  */
