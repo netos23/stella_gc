@@ -1,3 +1,0 @@
-/Users/nikitamorozov/edu_itmo/advanced_compilers/stella_gc/cmake-build-debug/CMakeFiles/stella_gc.dir
-/Users/nikitamorozov/edu_itmo/advanced_compilers/stella_gc/cmake-build-debug/CMakeFiles/edit_cache.dir
-/Users/nikitamorozov/edu_itmo/advanced_compilers/stella_gc/cmake-build-debug/CMakeFiles/rebuild_cache.dir

@@ -1,8 +1,8 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-#include "runtime.h"
-#include "gc.h"
+#include "stella/runtime.h"
+#include "stella/gc.h"
 
 int total_allocated_fields = 0;
 
