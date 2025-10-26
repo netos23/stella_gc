@@ -1,6 +1,6 @@
 #!/bin/sh
 
-err=0
+err=$(ls | wc -l)
 suc=0
 echo ""
 for file in *; do
@@ -9,9 +9,9 @@ for file in *; do
   if [ $? -eq 0 ]
   then
     ((suc++))
+    ((err--))
     echo "✅test/$file.c: $file"
   else
-    ((err++))
     echo "::group::❌test/$file.c: $file (failed)"
     echo "Timeout or error reached"
     echo "::endgroup::"
