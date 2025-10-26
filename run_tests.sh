@@ -5,7 +5,7 @@ suc=0
 echo ""
 for file in *; do
   chmod +x $file
-  timeout 15s ./$file
+  timeout 15s ./$file < 5
   if [ $? -eq 0 ]
   then
     ((suc++))
