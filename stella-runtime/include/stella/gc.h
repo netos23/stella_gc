@@ -9,11 +9,13 @@
 
 #include "stella/runtime.h"
 
-struct gc_root;
+#define MIN(a,b) (((a)<(b))?(a):(b))
+#define MAX(a,b) (((a)>(b))?(a):(b))
 
-struct gc_state;
+#ifndef MAX_ALLOC_SIZE
+#define MAX_ALLOC_SIZE 1024*1024
+#endif
 
-#define MAX_ALLOC_SIZE 1024
 #define FROM_SPACE_SIZE MAX_ALLOC_SIZE
 #define TO_SPACE_SIZE MAX_ALLOC_SIZE
 
@@ -23,9 +25,41 @@ struct gc_state;
 /** This macro is used whenever the runtime wants to OVERWRITE a heap object's field.
  * This is NOT used when initializing object fields.
  */
-#define GC_WRITE_BARRIER(object, field_index, contents, write_code) write_code // NO BARRIER
+#define GC_WRITE_BARRIER(object, field_index, contents, write_code) (gc_write_barrier(object, field_index, contents), write_code) // NO BARRIER
 
 #define GC_OBJ_SIZE(obj) sizeof(stella_object) + STELLA_OBJECT_HEADER_FIELD_COUNT(obj->object_header) * sizeof(void *)
+
+typedef struct Gc_root {
+    struct Gc_root *next, *prev;
+    void **content;
+} gc_root;
+
+typedef struct Gc_state {
+    void *from_space, *to_space;
+    size_t from_space_size, to_space_size;
+    void *scan, *next, *limit;
+    gc_root *roots_list;
+    gc_root *roots_last;
+    size_t roots_size;
+    bool gc_running;
+} gc_state;
+
+typedef struct Gc_stats {
+    size_t total_allocated_bytes;
+    size_t total_allocated;
+    size_t maximum_residency_bytes;
+    size_t maximum_residency;
+    size_t residency_bytes;
+    size_t residency;
+    size_t reads;
+    size_t writes;
+    size_t read_barriers;
+    size_t write_barriers;
+    size_t gc_cycles;
+} gc_stats;
+
+extern gc_state current_state;
+extern gc_stats stats;
 
 /** Allocate an object on the heap of AT LEAST size_in_bytes bytes.
  * If necessary, this should start/continue garbage collection.

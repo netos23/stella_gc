@@ -6,23 +6,7 @@
 #include "stella/gc.h"
 
 
-typedef struct Gc_root {
-    struct Gc_root *next, *prev;
-    void **content;
-} gc_root;
-
-typedef struct Gc_state {
-    void *from_space, *to_space;
-    size_t from_space_size, to_space_size;
-    void *scan, *next, *limit;
-    gc_root *roots_list;
-    gc_root *roots_last;
-    size_t roots_size;
-    bool gc_running;
-} gc_state;
-
-
-static gc_state current_state = {
+gc_state current_state = {
         .from_space = NULL,
         .to_space = NULL,
         .from_space_size = 0,
@@ -36,19 +20,36 @@ static gc_state current_state = {
         .gc_running = false,
 };
 
+gc_stats stats = {
+        .total_allocated_bytes= 0,
+        .total_allocated= 0,
+        .maximum_residency_bytes= 0,
+        .maximum_residency= 0,
+        .residency_bytes= 0,
+        .residency= 0,
+        .reads= 0,
+        .writes= 0,
+        .read_barriers= 0,
+        .write_barriers= 0,
+        .gc_cycles= 0,
+};
+
 
 bool is_from_space(void *p) {
-    void *from_space = current_state.from_space;
-    return from_space <= p && p < from_space + current_state.from_space_size;
+    char *obj = (char *) p;
+    char *from_space = (char *) current_state.from_space;
+    return from_space <= obj && obj < from_space + current_state.from_space_size;
 }
 
 bool is_to_space(void *p) {
-    void *to_space = current_state.to_space;
-    return to_space <= p && p < to_space + current_state.to_space_size;
+    char *obj = (char *) p;
+    char *to_space = (char *) current_state.to_space;
+    return to_space <= obj && obj < to_space + current_state.to_space_size;
 }
 
 
 void *get_first_field(void *p) {
+    stats.reads++;
     stella_object *obj = (stella_object *) p;
     size_t fields_count = STELLA_OBJECT_HEADER_FIELD_COUNT(obj->object_header);
     if (fields_count <= 0) {
@@ -60,6 +61,7 @@ void *get_first_field(void *p) {
 
 
 void set_first_field(void *p, void *data) {
+    stats.writes++;
     stella_object *obj = (stella_object *) p;
     size_t fields_count = STELLA_OBJECT_HEADER_FIELD_COUNT(obj->object_header);
     if (fields_count <= 0) {
@@ -76,11 +78,14 @@ void chase(void *p) {
         size_t fields_count = STELLA_OBJECT_HEADER_FIELD_COUNT(obj->object_header);
         void *q = current_state.next;
         size_t q_size = GC_OBJ_SIZE(obj);
-        current_state.next = q + q_size;
+        current_state.next = (char *) q + q_size;
         void *r = NULL;
+        stats.reads++;
+        stats.writes++;
         memcpy(q, p, q_size);
         for (size_t i = 0; i < fields_count; i++) {
             void *qf1 = obj->object_fields[i];
+            stats.reads++;
             void *qff1 = get_first_field(qf1);
             if (is_from_space(qf1) && !is_to_space(qff1)) {
                 r = qf1;
@@ -133,12 +138,15 @@ void collect_garbage() {
 void *scan_and_alloc(size_t size_in_bytes) {
     size_t scanned = 0;
     while (scanned < size_in_bytes) {
+        stats.reads++;
         stella_object *obj = (stella_object *) current_state.scan;
         size_t field_count = STELLA_OBJECT_HEADER_FIELD_COUNT(obj->object_header);
         size_t obj_size = GC_OBJ_SIZE(obj);
         for (size_t i = 0; i < field_count; i++) {
             void *field = obj->object_fields[i];
+            stats.reads++;
             if (is_from_space(field)) {
+                stats.writes++;
                 obj->object_fields[i] = forward(field);
             }
         }
@@ -154,6 +162,12 @@ void *scan_and_alloc(size_t size_in_bytes) {
         exit(-1);
     }
 
+    stats.total_allocated++;
+    stats.total_allocated_bytes += size_in_bytes;
+    stats.residency++;
+    stats.residency_bytes += size_in_bytes;
+    stats.writes++;
+
     if (current_state.scan >= current_state.next) {
         current_state.gc_running = false;
         void *tmp = current_state.from_space;
@@ -163,7 +177,13 @@ void *scan_and_alloc(size_t size_in_bytes) {
         size_t size_tmp = current_state.from_space_size;
         current_state.from_space_size = current_state.to_space_size;
         current_state.to_space_size = size_tmp;
+        stats.gc_cycles++;
+        stats.maximum_residency = MAX(stats.maximum_residency, stats.residency);
+        stats.maximum_residency_bytes = MAX(stats.maximum_residency_bytes, stats.residency_bytes);
+        stats.residency = 0;
+        stats.residency_bytes = 0;
     }
+
 
     current_state.limit -= size_in_bytes;
     return current_state.limit;
@@ -192,10 +212,21 @@ void *gc_alloc(size_t size_in_bytes) {
     void *ptr = current_state.next;
     current_state.next += size_in_bytes;
 
+    stats.total_allocated++;
+    stats.total_allocated_bytes += size_in_bytes;
+    stats.residency++;
+    stats.residency_bytes += size_in_bytes;
+    stats.writes++;
+
     return ptr;
 }
 
 void gc_read_barrier(void *object, int field_index) {
+    stats.read_barriers++;
+    if(!current_state.gc_running){
+        return;
+    }
+
     stella_object *obj = (stella_object *) object;
     void *f = obj->object_fields[field_index];
     if (is_from_space(f)) {
@@ -205,7 +236,7 @@ void gc_read_barrier(void *object, int field_index) {
 
 
 void gc_write_barrier(void *object, int field_index, void *contents) {
-    // no op
+    stats.write_barriers++;
 }
 
 void gc_push_root(void **object) {
@@ -259,12 +290,70 @@ void gc_pop_root(void **object) {
     current_state.roots_size--;
 }
 
+static void fmt_commas(size_t v, char *out, size_t cap) {
+    char buf[64];
+    size_t i = 0, group = 0;
+    if (v == 0) {
+        out[0] = '0';
+        out[1] = '\0';
+        return;
+    }
+    while (v && i + 1 < sizeof(buf)) {
+        if (group == 3) {
+            buf[i++] = ',';
+            group = 0;
+        }
+        buf[i++] = (char) ('0' + (v % 10));
+        v /= 10;
+        group++;
+    }
+
+    size_t n = (i < cap - 1) ? i : cap - 1;
+    for (size_t k = 0; k < n; k++) out[k] = buf[i - 1 - k];
+    out[n] = '\0';
+}
+
+static void fmt_pair_bytes_objs(size_t bytes, size_t objs, char *out, size_t cap) {
+    char b[64], o[64];
+    fmt_commas(bytes, b, sizeof(b));
+    fmt_commas(objs, o, sizeof(o));
+    snprintf(out, cap, "%s bytes (%s objects)", b, o);
+}
+
+
 void print_gc_alloc_stats() {
+    char totalalloc[96], maxres[96], curres[96];
+    fmt_pair_bytes_objs(stats.total_allocated_bytes, stats.total_allocated, totalalloc, sizeof totalalloc);
+    fmt_pair_bytes_objs(stats.maximum_residency_bytes, stats.maximum_residency, maxres, sizeof maxres);
+    fmt_pair_bytes_objs(stats.residency_bytes, stats.residency, curres, sizeof curres);
+
+    char readss[64], writess[64], rbs[64], wbs[64], cycless[64];
+    fmt_commas(stats.reads, readss, sizeof readss);
+    fmt_commas(stats.writes, writess, sizeof writess);
+    fmt_commas(stats.read_barriers, rbs, sizeof rbs);
+    fmt_commas(stats.write_barriers, wbs, sizeof wbs);
+    fmt_commas(stats.gc_cycles, cycless, sizeof cycless);
+
+    printf("Garbage collector (GC) statistics:\n");
+    printf("- Total memory allocation: %s\n", totalalloc);
+    printf("- GC cycles: %s\n", cycless);
+    printf("- Maximum residency: %s\n", maxres);
+    printf("- Current residency: %s\n", curres);
+    printf("- Total memory use: %s reads and %s writes\n", readss, writess);
+    printf("- Barrier hits: %s read, %s write\n", rbs, wbs);
 
 }
 
 void print_gc_state() {
+    char curres[96];
+    fmt_pair_bytes_objs(stats.residency_bytes, stats.residency, curres, sizeof curres);
+    size_t free_memory = current_state.limit - current_state.scan;
+    printf("Garbage collector (GC) state:\n");
 
+    printf("- Total scan: %p, next: %p, limit: %p\n", current_state.scan, current_state.next, current_state.limit);
+    printf("- Current allocated: %s\n", curres);
+    printf("- Total free memory : %zu\n", free_memory);
+    print_gc_roots();
 }
 
 
@@ -279,7 +368,7 @@ static size_t size_len(size_t v) {
 
 static size_t ptr_to_str(char *buf, size_t cap, const void *p) {
     if (p) return (size_t) snprintf(buf, cap, "%p", p);
-    return (size_t) snprintf(buf, cap, "(nil)");
+    return (size_t) snprintf(buf, cap, "(null)");
 }
 
 static void print_border(FILE *out,
@@ -305,14 +394,14 @@ static void print_border(FILE *out,
 void print_gc_roots() {
     FILE *out = stdout;
 
-    // Если список пуст — краткое сообщение и выход
+
     if (!current_state.roots_list) {
         fprintf(out, "GC roots: empty list (head=%p, tail=%p)\n",
                 (void *) current_state.roots_list, (void *) current_state.roots_last);
         return;
     }
 
-    // Заголовки таблицы
+
     const char *H_IDX = "#";
     const char *H_NODE = "node";
     const char *H_PREV = "prev";
