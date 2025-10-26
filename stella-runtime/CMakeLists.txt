@@ -10,7 +10,7 @@ add_library(stella_runtime)
 
 set(CMAKE_C_STANDARD 99)
 
-set(public_headers include/gc.h include/runtime.h)
+set(public_headers include/stella/gc.h include/stella/runtime.h)
 set(sources src/gc.c src/runtime.c)
 
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" FILES ${sources})
