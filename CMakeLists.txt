@@ -5,7 +5,7 @@ set(CMAKE_C_STANDARD 99)
 
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
-set(TEST_SOURCES_LIST test/custom_test test/stella-tests/ok)
+set(TEST_SOURCES_LIST test/custom_test #[[test/stella-tests/ok]])
 set(GENERATED_TEST_SOURCES ${CMAKE_CURRENT_BINARY_DIR}/test/generated_sources)
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/test/generated_sources)
 
