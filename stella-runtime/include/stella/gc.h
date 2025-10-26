@@ -4,6 +4,18 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <stddef.h>
+#include <stdbool.h>
+#include <string.h>
+
+#include "stella/runtime.h"
+
+struct gc_root;
+
+struct gc_state;
+
+#define MAX_ALLOC_SIZE 1024
+#define FROM_SPACE_SIZE MAX_ALLOC_SIZE
+#define TO_SPACE_SIZE MAX_ALLOC_SIZE
 
 /** This macro is used whenever the runtime wants to READ a heap object's field.
  */
@@ -11,17 +23,20 @@
 /** This macro is used whenever the runtime wants to OVERWRITE a heap object's field.
  * This is NOT used when initializing object fields.
  */
-#define GC_WRITE_BARRIER(object, field_index, contents, write_code) (gc_write_barrier(object, field_index, contents), write_code) // NO BARRIER
+#define GC_WRITE_BARRIER(object, field_index, contents, write_code) write_code // NO BARRIER
+
+#define GC_OBJ_SIZE(obj) sizeof(stella_object) + STELLA_OBJECT_HEADER_FIELD_COUNT(obj->object_header) * sizeof(void *)
 
 /** Allocate an object on the heap of AT LEAST size_in_bytes bytes.
  * If necessary, this should start/continue garbage collection.
  * Returns a pointer to the newly allocated object.
  */
-void* gc_alloc(size_t size_in_bytes);
+void *gc_alloc(size_t size_in_bytes);
 
 /** GC-specific code which must be executed on each READ operation.
  */
 void gc_read_barrier(void *object, int field_index);
+
 /** GC-specific code which must be executed on each WRITE operation
  * (except object field initialization).
  */
@@ -30,6 +45,7 @@ void gc_write_barrier(void *object, int field_index, void *contents);
 /** Push a reference to a root (variable) on the GC's stack of roots.
  */
 void gc_push_root(void **object);
+
 /** Pop a reference to a root (variable) on the GC's stack of roots.
  * The argument must be at the top of the stack.
  */
@@ -58,5 +74,6 @@ void print_gc_state();
  * May be useful for debugging.
  */
 void print_gc_roots();
+
 
 #endif
