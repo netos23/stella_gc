@@ -47,6 +47,30 @@ bool is_to_space(void *p) {
     return to_space <= obj && obj < to_space + current_state.to_space_size;
 }
 
+bool is_record(void *p){
+    stella_object *obj = (stella_object *) p;
+    enum TAG tag = STELLA_OBJECT_HEADER_TAG(obj->object_header);
+    size_t size = STELLA_OBJECT_HEADER_FIELD_COUNT(obj->object_header);
+    switch (tag) {
+        case TAG_ZERO:
+        case TAG_SUCC:
+        case TAG_FALSE:
+        case TAG_TRUE:
+            return false;
+        case TAG_FN:
+        case TAG_REF:
+        case TAG_UNIT:
+            return true;
+        case TAG_TUPLE:
+            return size > 0;
+        case TAG_INL:
+        case TAG_INR:
+        case TAG_EMPTY:
+        case TAG_CONS:
+            return true;
+    }
+}
+
 
 void *get_first_field(void *p) {
     stats.reads++;
@@ -84,11 +108,15 @@ void chase(void *p) {
         stats.writes++;
         memcpy(q, p, q_size);
         for (size_t i = 0; i < fields_count; i++) {
-            void *qf1 = obj->object_fields[i];
+            stella_object *qf1 = (stella_object *) obj->object_fields[i];
             stats.reads++;
-            void *qff1 = get_first_field(qf1);
-            if (is_from_space(qf1) && !is_to_space(qff1)) {
-                r = qf1;
+
+            if (is_record(qf1) && is_from_space(qf1)) {
+                void *qff1 = get_first_field(qf1);
+                if(!is_record(qff1) || !is_to_space(qff1)){
+                    r = qf1;
+                }
+
             }
         }
         set_first_field(p, q);
@@ -97,14 +125,14 @@ void chase(void *p) {
 }
 
 void *forward(void *p) {
-    if (is_from_space(p)) {
+    if (is_record(p) && is_from_space(p)) {
         void *f1 = get_first_field(p);
 
         if (!f1) {
             return p;
         }
 
-        if (is_to_space(f1)) {
+        if (is_record(f1) && is_to_space(f1)) {
             return f1;
         } else {
             chase(p);
