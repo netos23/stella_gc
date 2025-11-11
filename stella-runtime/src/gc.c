@@ -48,6 +48,7 @@ bool is_to_space(void *p) {
 }
 
 bool is_record(void *p){
+    if (!p) return false;
     stella_object *obj = (stella_object *) p;
     enum TAG tag = STELLA_OBJECT_HEADER_TAG(obj->object_header);
     size_t size = STELLA_OBJECT_HEADER_FIELD_COUNT(obj->object_header);
@@ -68,6 +69,8 @@ bool is_record(void *p){
         case TAG_EMPTY:
         case TAG_CONS:
             return true;
+        default:
+            return false;
     }
 }
 
@@ -113,7 +116,7 @@ void chase(void *p) {
 
             if (is_record(qf1) && is_from_space(qf1)) {
                 void *qff1 = get_first_field(qf1);
-                if(!is_record(qff1) || !is_to_space(qff1)){
+                if (!is_record(qff1) || !is_to_space(qff1)) {
                     r = qf1;
                 }
 
